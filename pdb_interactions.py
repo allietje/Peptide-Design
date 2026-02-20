@@ -5,6 +5,14 @@ Analyze inter-chain interactions in a PDB structure.
 Reads a PDB file, detects interactions (ionic, H-bonds, hydrophobic, generic contact)
 between selected chains, and outputs a table with residues, locations, types, and distances.
 
+Distance measurements:
+- Ionic/salt bridges: Distance between charge-bearing atoms (e.g., OD1/OD2 of ASP/GLU 
+  to NZ of LYS or NH1/NH2 of ARG)
+- H-bonds: Distance from H atom to acceptor atom (O or N). If H atoms are not present 
+  in the PDB (common in X-ray structures), falls back to heavy-atom distance (donor N/O 
+  to acceptor O/N)
+- Hydrophobic/Contact: Minimum distance between any heavy atoms of the two residues
+
 Usage:
   python pdb_interactions.py structure.pdb
   python pdb_interactions.py structure.pdb --chains A B --interactions ionic hbond
@@ -117,6 +125,29 @@ def get_acceptor_atoms(res: Residue) -> List[Tuple[str, np.ndarray]]:
     return [(a, res[a].coord) for a in names if a in res]
 
 
+def get_hydrogen_atoms_for_donor(res: Residue, donor_atom_name: str) -> List[Tuple[str, np.ndarray]]:
+    """
+    Find H atoms attached to a donor atom (N or O).
+    Returns list of (H_atom_name, coord) pairs.
+    """
+    if donor_atom_name not in res:
+        return []
+    
+    donor_atom = res[donor_atom_name]
+    donor_coord = donor_atom.coord
+    
+    # Find H atoms bonded to this donor atom
+    # H atoms are typically within ~1 Å of N or O
+    h_atoms = []
+    for atom in res.get_atoms():
+        if atom.element == "H":
+            dist = np.linalg.norm(atom.coord - donor_coord)
+            if dist < 1.2:  # Typical N-H or O-H bond length is ~1.0 Å
+                h_atoms.append((atom.get_name().strip(), atom.coord))
+    
+    return h_atoms
+
+
 def is_hbond_pair(res1: Residue, res2: Residue) -> bool:
     """True if pair can form H-bond (one has donor, other has acceptor)."""
     d1, a1 = len(get_donor_atoms(res1)), len(get_acceptor_atoms(res1))
@@ -216,7 +247,7 @@ def run_analysis(
             residues_by_chain[chain.id] = res_list
             for r in res_list:
                 for a in r.get_atoms():
-                    all_atoms.append(a)
+                    all_atoms.append(a)  # Include H atoms for H-bond detection
 
     if len(use_chains) < 2:
         return pd.DataFrame(
@@ -228,6 +259,7 @@ def run_analysis(
 
     ns = NeighborSearch(all_atoms)
     # Find all residue pairs (from different chains) that have any atoms within max_radius
+    # Include H atoms in search for H-bond detection
     seen_pairs: Set[Tuple[Residue, Residue]] = set()
     for model in structure:
         for chain in model:
@@ -237,12 +269,8 @@ def run_analysis(
                 if not is_aa(res, standard=True):
                     continue
                 for atom in res.get_atoms():
-                    if atom.element == "H":
-                        continue
                     center = atom.coord
                     for neighbor in ns.search(center, max_radius, level="A"):
-                        if neighbor.element == "H":
-                            continue
                         other = neighbor.parent
                         if not is_aa(other, standard=True):
                             continue
@@ -290,14 +318,45 @@ def run_analysis(
             don2, acc2 = get_donor_atoms(res2), get_acceptor_atoms(res2)
             best_h = float("inf")
             ba1, ba2 = "", ""
+            
+            # Try res1 as donor, res2 as acceptor
             if don1 and acc2:
-                d, a1, a2 = min_distance_atom_sets(don1, acc2)
-                if d < best_h:
-                    best_h, ba1, ba2 = d, a1, a2
+                for donor_name, donor_coord in don1:
+                    # First try to find H atoms attached to this donor
+                    h_atoms = get_hydrogen_atoms_for_donor(res1, donor_name)
+                    if h_atoms:
+                        # Measure H-to-acceptor distance
+                        for h_name, h_coord in h_atoms:
+                            for acc_name, acc_coord in acc2:
+                                d = np.linalg.norm(h_coord - acc_coord)
+                                if d < best_h:
+                                    best_h, ba1, ba2 = d, h_name, acc_name
+                    else:
+                        # No H found, use heavy-atom distance as fallback
+                        for acc_name, acc_coord in acc2:
+                            d = np.linalg.norm(donor_coord - acc_coord)
+                            if d < best_h:
+                                best_h, ba1, ba2 = d, donor_name, acc_name
+            
+            # Try res2 as donor, res1 as acceptor
             if don2 and acc1:
-                d, a1, a2 = min_distance_atom_sets(don2, acc1)
-                if d < best_h:
-                    best_h, ba1, ba2 = d, a1, a2
+                for donor_name, donor_coord in don2:
+                    # First try to find H atoms attached to this donor
+                    h_atoms = get_hydrogen_atoms_for_donor(res2, donor_name)
+                    if h_atoms:
+                        # Measure H-to-acceptor distance
+                        for h_name, h_coord in h_atoms:
+                            for acc_name, acc_coord in acc1:
+                                d = np.linalg.norm(h_coord - acc_coord)
+                                if d < best_h:
+                                    best_h, ba1, ba2 = d, h_name, acc_name
+                    else:
+                        # No H found, use heavy-atom distance as fallback
+                        for acc_name, acc_coord in acc1:
+                            d = np.linalg.norm(donor_coord - acc_coord)
+                            if d < best_h:
+                                best_h, ba1, ba2 = d, donor_name, acc_name
+            
             if best_h <= cutoffs["hbond"]:
                 add_row("hbond", best_h, ba1, ba2)
 
