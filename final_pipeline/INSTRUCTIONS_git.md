@@ -1,6 +1,6 @@
 # GPCR Peptide Design Pipeline
 
-This document mirrors the full operator guide without site-specific paths, hostnames, or partition names. Copy `example_config.yaml` to `config.yaml` locally and set paths there.
+Copy `example_config.yaml` to `config.yaml` locally and set paths there.
 
 ## Overview
 
