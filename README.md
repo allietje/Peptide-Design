@@ -36,11 +36,6 @@ Other scripts or subfolders may appear on different branches; browse the reposit
 
 See **`final_pipeline/README.md`** for stage overview, outputs, and **`final_pipeline/instructions.md`** for detailed usage and troubleshooting.
 
-## What not to commit
-
-- **`final_pipeline/config.yaml`** if it contains **local paths**, tokens, or site-specific settings (use **`example_config.yaml`** as the template you *do* commit).
-- Large run directories (`results/`, `msa_cache/`, ColabFold outputs, etc.) — add them to `.gitignore` unless you intentionally version small fixtures.
-
 ## Contributing / branches
 
 Use feature branches and pull requests as usual. Default development branch name in this repo may be `working` or another name—check on GitHub.
