@@ -1,0 +1,89 @@
+# Example configuration for the GPCR peptide evaluation pipeline (safe to commit).
+#
+# Usage:
+#   cp example_config.yaml config.yaml
+#   Edit config.yaml: set paths, chains, SLURM partition, and thresholds for your site.
+#   Do NOT commit config.yaml if it contains local paths or secrets — keep it local or private.
+#
+# Threshold modes: filter | flag | ignore
+#   filter = hard cutoff (failing designs excluded from downstream stages)
+#   flag   = recorded in CSV only; design kept
+#   ignore = metric computed; threshold not applied
+
+receptor_chain: R
+peptide_chain: P
+
+stage1:
+  pocket_cutoff: 6.0
+  head_cutoff: 5.0
+  contact_cutoff: 5.0
+  hotspot_residues: []   # e.g. [123, 456] or [] to skip hotspot filter
+  severe_clash_cutoff: 1.8
+  mild_clash_cutoff: 2.1
+  thresholds:
+    min_head_in_pocket: { value: 2, mode: filter }
+    min_head_pocket_pairs: { value: 4, mode: filter }
+    max_severe_clashes: { value: 0, mode: filter }
+    max_mild_clashes: { value: 5, mode: filter }
+    min_hotspot_contacts: { value: 1, mode: filter }
+    max_peptide_pocket_dist: { value: 15.0, mode: flag }
+
+stage2:
+  # Absolute path to a local ProteinMPNN clone (set on your machine)
+  mpnn_path: /path/to/ProteinMPNN
+  num_seq_per_target: 4
+  sampling_temp: "0.1"
+  batch_size: 4   # must be <= num_seq_per_target
+
+stage3:
+  thresholds:
+    max_mpnn_score: { value: 2.5, mode: filter }
+    max_abs_net_charge: { value: 5, mode: flag }
+    max_hydrophobic_fraction: { value: 0.60, mode: flag }
+
+stage4:
+  colabfold_bin: colabfold_batch
+  msa_cache_dir: msa_cache/   # relative to final_pipeline/ unless you use an absolute path
+  num_models: 5
+  num_recycles: 3
+  num_gpus: 4
+  # Replace with your cluster’s GPU partition and limits
+  slurm_partition: gpu
+  slurm_time: "04:00:00"
+  slurm_mem: 64G
+
+stage5:
+  contact_cutoff: 5.0
+  cb_cutoff_ilis: 8.0
+  pae_cutoff_ilis: 12.0
+  use_deeptmhmm: true
+  thresholds:
+    min_ipTM: { value: 0.5, mode: filter }
+    max_iPAE: { value: 10.0, mode: filter }
+    min_ipLDDT: { value: 70, mode: filter }
+    min_iLIS: { value: 0.20, mode: filter }
+    min_pocket_depth: { value: 0, mode: flag }
+    require_topo_pass: { value: true, mode: flag }
+
+stage6:
+  enabled: false
+  # If you enable Stage 6, set these to your Rosetta installation
+  rosetta_bin: /path/to/rosetta/main/source/bin
+  rosetta_db: /path/to/rosetta/main/database
+  top_fraction: 0.10
+  run_flexpep: false
+  slurm_partition: gpu
+  thresholds:
+    min_dSASA_int: { value: 500, mode: flag }
+    max_interface_score_density: { value: -0.010, mode: flag }
+    max_delta_unsatHbonds: { value: 5, mode: flag }
+    min_sc_value: { value: 0.5, mode: flag }
+
+stage7:
+  weights:
+    iLIS: 0.25
+    ipTM: 0.20
+    ipLDDT: 0.20
+    iPAE: 0.20
+    pocket_depth: 0.10
+    topology: 0.05
